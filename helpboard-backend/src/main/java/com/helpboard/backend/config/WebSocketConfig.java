@@ -10,13 +10,13 @@ import org.springframework.messaging.simp.stomp.StompCommand;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.messaging.support.ChannelInterceptor;
 import org.springframework.messaging.support.MessageHeaderAccessor;
+import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
-
-import java.util.Objects;
 
 /**
  * Configures WebSocket and STOMP message broker.
@@ -42,9 +42,8 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws")
-                // Limit allowed origins to the Next.js dev server for local development
-                .setAllowedOrigins("http://localhost:3000")
-                .withSockJS(); // Enable SockJS fallback options
+        .setAllowedOriginPatterns("http://localhost:3000", "http://127.0.0.1:3000")
+        .withSockJS();
     }
 
     /**
@@ -71,42 +70,88 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
             @Override
             public Message<?> preSend(Message<?> message, MessageChannel channel) {
                 StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
-
-                // Authenticate CONNECT and SUBSCRIBE commands
-                if (accessor != null && (StompCommand.CONNECT.equals(accessor.getCommand()) || StompCommand.SUBSCRIBE.equals(accessor.getCommand()))) {
-                    String authToken = accessor.getFirstNativeHeader("Authorization"); // For CONNECT
-                    if (authToken == null) {
-                        // Fallback: Some STOMP clients might put it in the session attributes or as query param
-                        // This example assumes it's in the Authorization header.
-                        // For SockJS, the header needs to be passed in the SockJS constructor's 'headers' option.
-                        // e.g. new SockJS('/ws', null, { headers: { 'Authorization': 'Bearer <token>' } });
-                    }
-
-                    if (authToken != null && authToken.startsWith("Bearer ")) {
-                        String jwt = authToken.substring(7);
-                        try {
-                            String username = jwtUtil.extractUsername(jwt);
-                            if (username != null) {
-                                UserDetails userDetails = userDetailsService.loadUserByUsername(username);
-                                if (jwtUtil.validateToken(jwt, userDetails)) {
-                                    UsernamePasswordAuthenticationToken authentication =
-                                            new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
-                                    accessor.setUser(authentication); // Set the authenticated user
-                                    return message;
+                
+                if (accessor != null) {
+                    StompCommand command = accessor.getCommand();
+                    
+                    // Authenticate CONNECT command
+                    if (StompCommand.CONNECT.equals(command)) {
+                        String authToken = accessor.getFirstNativeHeader("Authorization");
+                        
+                        if (authToken != null && authToken.startsWith("Bearer ")) {
+                            String jwt = authToken.substring(7);
+                            try {
+                                String username = jwtUtil.extractUsername(jwt);
+                                if (username != null) {
+                                    UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+                                    if (jwtUtil.validateToken(jwt, userDetails)) {
+                                        UsernamePasswordAuthenticationToken authentication =
+                                                new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+                                        accessor.setUser(authentication); // Set the authenticated user - this persists for the session
+                                        SecurityContextHolder.getContext().setAuthentication(authentication);
+                                        
+                                        // Also store in session attributes as backup
+                                        SimpMessageHeaderAccessor simpAccessor = MessageHeaderAccessor.getAccessor(message, SimpMessageHeaderAccessor.class);
+                                        if (simpAccessor != null) {
+                                            java.util.Map<String, Object> sessionAttrs = simpAccessor.getSessionAttributes();
+                                            if (sessionAttrs != null) {
+                                                sessionAttrs.put("SPRING_SECURITY_CONTEXT", authentication);
+                                                System.out.println("WebSocket interceptor: Stored authentication in session attributes during CONNECT");
+                                            } else {
+                                                System.out.println("WebSocket interceptor: Session attributes not available during CONNECT");
+                                            }
+                                        }
+                                        
+                                        System.out.println("WebSocket interceptor: CONNECT authenticated for user: " + username);
+                                        return message;
+                                    }
                                 }
+                            } catch (Exception e) {
+                                // Log and reject connection on invalid token
+                                System.err.println("WebSocket JWT authentication failed: " + e.getMessage());
+                                throw new RuntimeException("Invalid JWT token for WebSocket connection", e);
                             }
-                        } catch (Exception e) {
-                            // Log and reject connection on invalid token
-                            System.err.println("WebSocket JWT authentication failed: " + e.getMessage());
-                            throw new RuntimeException("Invalid JWT token for WebSocket connection", e);
+                        }
+                        // If no valid token, connection will be unauthorized
+                        if (accessor.getUser() == null) {
+                            System.err.println("Unauthorized WebSocket connection attempt: No valid JWT token.");
+                            throw new RuntimeException("Unauthorized: No valid JWT token provided.");
                         }
                     }
-                    // If no valid token, connection or subscription will be unauthorized
-                    if (accessor.getUser() == null) {
-                        System.err.println("Unauthorized WebSocket connection attempt: No valid JWT token.");
-                        throw new RuntimeException("Unauthorized: No valid JWT token provided.");
+                    // For SEND, SUBSCRIBE, and other commands, restore authentication from session
+                    else if (command != null && command != StompCommand.DISCONNECT) {
+                        System.out.println("WebSocket interceptor: Processing " + command + " command");
+                        
+                        // Try to get authentication from accessor first
+                        if (accessor.getUser() != null && accessor.getUser() instanceof UsernamePasswordAuthenticationToken) {
+                            UsernamePasswordAuthenticationToken auth = (UsernamePasswordAuthenticationToken) accessor.getUser();
+                            SecurityContextHolder.getContext().setAuthentication(auth);
+                            System.out.println("WebSocket interceptor: Authentication restored from accessor for " + command);
+                        } else {
+                            // Fallback: try to get from session attributes
+                            SimpMessageHeaderAccessor simpAccessor = MessageHeaderAccessor.getAccessor(message, SimpMessageHeaderAccessor.class);
+                            if (simpAccessor != null && simpAccessor.getSessionAttributes() != null) {
+                                Object sessionAuth = simpAccessor.getSessionAttributes().get("SPRING_SECURITY_CONTEXT");
+                                if (sessionAuth instanceof UsernamePasswordAuthenticationToken) {
+                                    UsernamePasswordAuthenticationToken auth = (UsernamePasswordAuthenticationToken) sessionAuth;
+                                    accessor.setUser(auth);
+                                    SecurityContextHolder.getContext().setAuthentication(auth);
+                                    System.out.println("WebSocket interceptor: Authentication restored from session attributes for " + command);
+                                } else {
+                                    System.err.println("WebSocket interceptor: No authentication found in session attributes for " + command);
+                                }
+                            } else {
+                                System.err.println("WebSocket interceptor: No session attributes available for " + command);
+                            }
+                            
+                            // If still no authentication, log warning
+                            if (SecurityContextHolder.getContext().getAuthentication() == null) {
+                                System.err.println("WebSocket interceptor: WARNING - No authentication set for " + command + " command. User: " + accessor.getUser());
+                            }
+                        }
                     }
                 }
+                
                 return message;
             }
         });

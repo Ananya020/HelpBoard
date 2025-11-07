@@ -123,6 +123,7 @@ public class MessageService {
      */
     public ChatMessageDTO mapMessageToChatMessageDTO(Message message) {
         ChatMessageDTO dto = modelMapper.map(message, ChatMessageDTO.class);
+        dto.setMessageId(message.getMessageId());
         dto.setRequestId(message.getRequest().getRequestId());
         dto.setSenderId(message.getSender().getUserId());
         dto.setSenderName(message.getSender().getName());

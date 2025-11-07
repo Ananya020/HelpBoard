@@ -10,12 +10,14 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
+import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 
-import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -42,15 +44,46 @@ public class ChatController {
      * @param chatMessageDTO The message payload from the client.
      */
     @MessageMapping("/requests/{requestId}/send")
-    public void sendChatMessage(@DestinationVariable Long requestId, @Valid @Payload ChatMessageDTO chatMessageDTO) {
-        Long senderId = authService.getCurrentUserId(); // Authenticated user from WebSocket session
-        Message savedMessage = messageService.saveMessage(requestId, senderId, chatMessageDTO.getMessageText());
+    public void sendChatMessage(
+            @DestinationVariable Long requestId, 
+            @Valid @Payload ChatMessageDTO chatMessageDTO,
+            SimpMessageHeaderAccessor headerAccessor) {
+        try {
+            System.out.println("Received message for request " + requestId + ": " + chatMessageDTO.getMessageText());
+            
+            // Get authenticated user from message header (set during CONNECT)
+            Long senderId = null;
+            if (headerAccessor != null && headerAccessor.getUser() != null) {
+                Object principal = headerAccessor.getUser();
+                if (principal instanceof UsernamePasswordAuthenticationToken) {
+                    UsernamePasswordAuthenticationToken auth = (UsernamePasswordAuthenticationToken) principal;
+                    UserDetails userDetails = (UserDetails) auth.getPrincipal();
+                    senderId = authService.getUserIdByEmail(userDetails.getUsername());
+                }
+            }
+            
+            if (senderId == null) {
+                System.err.println("Error: Could not determine sender ID from WebSocket session");
+                throw new IllegalStateException("User not authenticated in WebSocket session");
+            }
+            
+            System.out.println("Sender ID: " + senderId);
+            
+            Message savedMessage = messageService.saveMessage(requestId, senderId, chatMessageDTO.getMessageText());
+            System.out.println("Message saved with ID: " + savedMessage.getMessageId());
 
-        // Prepare DTO for broadcasting (includes senderName and timestamp)
-        ChatMessageDTO broadcastDTO = messageService.mapMessageToChatMessageDTO(savedMessage);
+            // Prepare DTO for broadcasting (includes senderName and timestamp)
+            ChatMessageDTO broadcastDTO = messageService.mapMessageToChatMessageDTO(savedMessage);
+            System.out.println("Broadcasting message to /topic/requests/" + requestId);
 
-        // Broadcast the message to all subscribers of this request's topic
-        messagingTemplate.convertAndSend("/topic/requests/" + requestId, broadcastDTO);
+            // Broadcast the message to all subscribers of this request's topic
+            messagingTemplate.convertAndSend("/topic/requests/" + requestId, broadcastDTO);
+            System.out.println("Message broadcast successful");
+        } catch (Exception e) {
+            System.err.println("Error processing chat message: " + e.getMessage());
+            e.printStackTrace();
+            throw e; // Re-throw to let STOMP handle the error
+        }
     }
 
     /**

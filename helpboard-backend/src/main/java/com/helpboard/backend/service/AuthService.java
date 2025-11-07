@@ -117,4 +117,17 @@ public class AuthService {
         }
         throw new IllegalStateException("User not authenticated.");
     }
+
+    /**
+     * Retrieves a user's ID by email.
+     *
+     * @param email The email of the user.
+     * @return The userId of the user.
+     * @throws IllegalStateException if user is not found.
+     */
+    public Long getUserIdByEmail(String email) {
+        return userRepository.findByEmail(email)
+                .map(User::getUserId)
+                .orElseThrow(() -> new IllegalStateException("User not found with email: " + email));
+    }
 }

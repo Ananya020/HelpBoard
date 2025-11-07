@@ -21,6 +21,7 @@ public class ChatMessageDTO {
     private String messageText;
 
     // These fields are populated by the server before broadcasting/saving
+    private Long messageId;
     private Long requestId;
     private Long senderId;
     private String senderName; // For display on client side

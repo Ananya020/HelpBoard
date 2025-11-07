@@ -23,7 +23,16 @@ export const useChatStore = create<ChatState>((set) => ({
   loadMessages: async (requestId: number) => {
     try {
       const response = await api.get(`/requests/${requestId}/messages`)
-      set({ messages: response.data })
+      // Map backend field names to frontend field names
+      const mappedMessages = response.data.map((msg: any) => ({
+        id: msg.messageId,
+        requestId: msg.requestId,
+        senderId: msg.senderId,
+        senderName: msg.senderName,
+        content: msg.messageText,
+        timestamp: msg.timestamp,
+      }))
+      set({ messages: mappedMessages })
     } catch (error) {
       console.error("Failed to load messages:", error)
     }

@@ -21,6 +21,7 @@ export default function ChatPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [messageInput, setMessageInput] = useState("")
   const [stompClient, setStompClient] = useState<Client | null>(null)
+  const [isConnected, setIsConnected] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -33,17 +34,38 @@ export default function ChatPage() {
 
           client.onConnect = () => {
             console.log("[v0] STOMP connected")
+            setIsConnected(true)
 
             client.subscribe(`/topic/requests/${requestId}`, (message) => {
-              const newMessage = JSON.parse(message.body)
-              console.log("[v0] Received message:", newMessage)
-              addMessage(newMessage)
+              const receivedMessage = JSON.parse(message.body)
+              console.log("[v0] Received message:", receivedMessage)
+              // Map backend field names to frontend field names
+              const mappedMessage = {
+                id: receivedMessage.messageId,
+                requestId: receivedMessage.requestId,
+                senderId: receivedMessage.senderId,
+                senderName: receivedMessage.senderName,
+                content: receivedMessage.messageText,
+                timestamp: receivedMessage.timestamp,
+              }
+              addMessage(mappedMessage)
             })
+          }
+
+          client.onDisconnect = () => {
+            console.log("[v0] STOMP disconnected")
+            setIsConnected(false)
           }
 
           client.onStompError = (frame) => {
             console.error("[v0] STOMP error:", frame)
+            setIsConnected(false)
             toast.error("Connection error. Please refresh the page.")
+          }
+
+          client.onWebSocketClose = () => {
+            console.log("[v0] WebSocket closed")
+            setIsConnected(false)
           }
 
           client.activate()
@@ -62,6 +84,7 @@ export default function ChatPage() {
     return () => {
       if (stompClient) {
         stompClient.deactivate()
+        setIsConnected(false)
       }
       clearMessages()
     }
@@ -72,18 +95,28 @@ export default function ChatPage() {
   }, [messages])
 
   const handleSendMessage = () => {
-    if (!messageInput.trim() || !stompClient || !stompClient.connected) {
+    if (!messageInput.trim() || !stompClient || !isConnected) {
+      console.warn("Cannot send message:", { 
+        hasInput: !!messageInput.trim(), 
+        hasClient: !!stompClient, 
+        isConnected: isConnected 
+      })
       return
     }
 
     try {
+      const messagePayload = { messageText: messageInput.trim() }
+      console.log("[v0] Sending message:", messagePayload)
+      console.log("[v0] Destination:", `/app/requests/${requestId}/send`)
+      
       stompClient.publish({
         destination: `/app/requests/${requestId}/send`,
-        body: JSON.stringify({ content: messageInput }),
+        body: JSON.stringify(messagePayload),
       })
       setMessageInput("")
+      console.log("[v0] Message sent successfully")
     } catch (error) {
-      console.error("Failed to send message:", error)
+      console.error("[v0] Failed to send message:", error)
       toast.error("Failed to send message")
     }
   }
@@ -109,7 +142,7 @@ export default function ChatPage() {
         <div className="card h-[calc(100vh-12rem)] flex flex-col">
           <div className="border-b pb-4 mb-4">
             <h1 className="text-2xl font-bold text-gray-900">Chat - Request #{requestId}</h1>
-            <p className="text-sm text-gray-500">{stompClient?.connected ? "🟢 Connected" : "🔴 Disconnected"}</p>
+            <p className="text-sm text-gray-500">{isConnected ? "🟢 Connected" : "🔴 Disconnected"}</p>
           </div>
 
           <div className="flex-1 overflow-y-auto mb-4 space-y-2">
@@ -137,7 +170,7 @@ export default function ChatPage() {
               onKeyPress={handleKeyPress}
               placeholder="Type your message..."
               className="input-field flex-1"
-              disabled={!stompClient?.connected}
+              disabled={!isConnected}
             />
             <button
               onClick={handleSendMessage}
