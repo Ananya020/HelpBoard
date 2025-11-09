@@ -1,4 +1,5 @@
 # HelpBoard - Neighborhood Sharing Platform
+<img src="Screenshot 2025-11-09 100120.png" alt="Brand font">
 
 A full-stack web application that enables neighbors to share, borrow, lend, and donate items within their community. Built with Next.js frontend and Spring Boot backend.
 
@@ -21,6 +22,9 @@ A full-stack web application that enables neighbors to share, borrow, lend, and 
 - **Requests Received**: Manage requests from other users
 - **Status Updates**: Approve, reject, or track request status
 - **Real-time Notifications**: Stay updated on request changes
+
+## Demo Video
+<h2>https://drive.google.com/file/d/1-kyJP42EOv-zJytk9kKG8yXo8wlFdw4R/view?usp=drive_link</h2>
 
 ## 🏗️ Tech Stack
 
@@ -291,6 +295,17 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [ ] Email notifications
 - [ ] Admin dashboard
 - [ ] Analytics and reporting
+
+## ScreenShots
+<img src="Screenshot 2025-11-07 015505.png" alt="ss1">
+<img src="Screenshot 2025-11-07 015417.png" alt="ss2">
+<img src="Screenshot 2025-11-07 015327.png" alt="ss3">
+<img src="Screenshot 2025-11-07 015258.png" alt="ss4">
+<img src="Screenshot 2025-11-07 015248.png" alt="ss5">
+
+## SpringBoot Terminal Logs Screenshot
+<img src="Screenshot 2025-11-07 020032.png" alt="spring logs">
+
 
 ## 📞 Support
 
